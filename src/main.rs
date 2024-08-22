@@ -17,8 +17,34 @@ fn main() {
         .add_systems(Update, update_cursor_position)
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_systems(Startup, spawn_ground)
-        .add_systems(Startup, spawn_triangle)
+        .add_systems(Startup, spawn_cube_pile)
+        //.add_systems(Startup, spawn_triangle)
         .run();
+}
+
+fn spawn_cube_pile(mut commands: Commands) {
+    const WIDTH: i32 = 13;
+    const HEIGHT: i32 = 10;
+    const CUBESIZE: f32 = 30.0;
+    const HALF_CUBESIZE: f32 = CUBESIZE / 2.0;
+    const STARTING_OFFSET_X: f32 = (WIDTH / 2) as f32 * CUBESIZE * -1.0;
+    const STARTING_OFFSET_Y: f32 = - 50.0;
+    let mut i = 0;
+
+    while i < WIDTH * HEIGHT {
+        let column = i % WIDTH;
+        let row = i / WIDTH;
+        commands
+            .spawn(RigidBody::Dynamic)
+            .insert(Collider::cuboid(HALF_CUBESIZE, HALF_CUBESIZE))
+            .insert(ColliderMassProperties::MassProperties(MassProperties{
+                local_center_of_mass: Vec2::ZERO,
+                principal_inertia: 3000.0,
+                mass: 10.0,
+            }))
+            .insert(TransformBundle::from(Transform::from_xyz(column as f32 * CUBESIZE + STARTING_OFFSET_X, row as f32 * CUBESIZE + STARTING_OFFSET_Y, 0.0)));
+        i += 1;
+    }
 }
 
 fn spawn_ground(mut commands: Commands) {
