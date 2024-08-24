@@ -1,19 +1,26 @@
 
 use bevy::{input::mouse::MouseButtonInput, prelude::*, window::PrimaryWindow};
 
+use bevy_inspector_egui::{prelude::ReflectInspectorOptions, quick::{ResourceInspectorPlugin, WorldInspectorPlugin}, InspectorOptions};
 use bevy_rapier2d::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(WorldInspectorPlugin::new())
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
         .init_resource::<CursorWorldCoords>()
+        .register_type::<CursorWorldCoords>()
+        .init_resource::<InspectorParams>()
+        .register_type::<InspectorParams>()
+        .add_plugins(ResourceInspectorPlugin::<CursorWorldCoords>::default())
+        .add_plugins(ResourceInspectorPlugin::<InspectorParams>::default())
         .add_event::<MBHeldEvent>()
         .add_event::<MBReleasedEvent>()
         .add_systems(Startup, setup)
         .add_systems(Update, mb_events)
         .add_systems(Update, (hold_body.after(mb_events), release_body.after(mb_events)))
-        .add_systems(Update, move_held_body.after(release_body) )
+        .add_systems(Update, drag_held_body.after(release_body) )
         .add_systems(Update, update_cursor_position)
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_systems(Startup, spawn_ground)
@@ -37,6 +44,8 @@ fn spawn_cube_pile(mut commands: Commands) {
         commands
             .spawn(RigidBody::Dynamic)
             .insert(Collider::cuboid(HALF_CUBESIZE, HALF_CUBESIZE))
+            .insert(ExternalForce{force: Vec2::ZERO, torque: 0.0})
+            .insert(GravityScale(1.0))
             .insert(ColliderMassProperties::MassProperties(MassProperties{
                 local_center_of_mass: Vec2::ZERO,
                 principal_inertia: 3000.0,
@@ -89,12 +98,37 @@ struct MBHeldEvent();
 struct MBReleasedEvent();
 
 fn move_held_body(
-    mut query: Query<(&mut Transform, &HeldBody)>,
+    mut query: Query<(&mut Transform,  &HeldBody)>,
     mouse_pos: Res<CursorWorldCoords>,
 ) {
     for (mut transform, held_body) in &mut query {
         transform.translation = (mouse_pos.0 + held_body.offset).xyx(); 
     }
+}
+
+fn drag_held_body(
+    mut query: Query<(&mut ExternalForce, &Transform), With<HeldBody>>,
+    mouse_pos: Res<CursorWorldCoords>,
+    inspector_params: Res<InspectorParams>,
+) {
+    for (mut force, transform) in &mut query {
+        let ab = mouse_pos.0 - transform.translation.xy();
+        let dist = ab.length_squared();
+        let norm_vec = ab.normalize_or_zero();
+        let new_force = norm_vec * step_curve(dist, inspector_params.force, inspector_params.threshold);
+        force.force = new_force;
+    }
+}
+
+// fn linear_curve<F: Float>(x: F, m: F) -> F {
+//     return m * x;
+// }
+
+fn step_curve(x: f32, step: f32, threshold: f32) -> f32 {
+    if x >= threshold {
+        return step;
+    }
+    return 0.0;
 }
 
 fn mb_events(
@@ -121,7 +155,7 @@ fn mb_events(
 fn hold_body(
     mut mb_held_evr: EventReader<MBHeldEvent>,
     rapier_context: Res<RapierContext>,
-    mut query: Query<(Entity, &Transform, &mut RigidBody)>,
+    mut query: Query<(Entity, &Transform, &mut GravityScale)>,
     mouse_pos: Res<CursorWorldCoords>,
     mut commands: Commands,
 ) -> () {
@@ -133,12 +167,12 @@ fn hold_body(
 
     match project_point(rapier_context, mouse_pos.0, query_lens.query()) {
         Some(entity) => {
-            let (_, transform, mut rb) = query.get_mut(entity).unwrap();
+            let (_, transform, mut gravity) = query.get_mut(entity).unwrap();
             let offset = transform.translation.xy() - mouse_pos.0;
             commands.entity(entity).insert(HeldBody{
                 offset,
             });
-            *rb = RigidBody::KinematicPositionBased;
+            gravity.0 = 0.0;
         },
         None => {},
     }
@@ -146,20 +180,32 @@ fn hold_body(
 
 fn release_body(
     mut mb_released_evr: EventReader<MBReleasedEvent>,
-    mut query: Query<(Entity, &mut RigidBody), With<HeldBody>>,
+    mut query: Query<(Entity, &mut GravityScale, &mut ExternalForce), With<HeldBody>>,
     mut commands: Commands,
 ) {
     if mb_released_evr.read().len() == 0 {
         return;
     }
-    for (entity, mut rb) in &mut query {
+    for (entity, mut gravity, mut force) in &mut query {
         commands.entity(entity).remove::<HeldBody>();
-        *rb = RigidBody::Dynamic;
+        gravity.0 = 1.0;
+        force.force = Vec2::ZERO;
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Reflect, Resource, Default, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
 struct CursorWorldCoords(Vec2);
+
+
+#[derive(Reflect, Resource, Default, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
+struct InspectorParams {
+    #[inspector(min = 0.0, max = 100.0)]
+    threshold: f32,
+    #[inspector(min = 0.0, max = 10000000.0)]
+    force: f32,
+}
 
 #[derive(Component)]
 struct HeldBody {
