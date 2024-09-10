@@ -16,8 +16,9 @@ pub fn spawn_cube_pile(mut commands: Commands) {
       commands
           .spawn(RigidBody::Dynamic)
           .insert(Collider::cuboid(HALF_CUBESIZE, HALF_CUBESIZE))
-          .insert(ExternalForce{force: Vec2::ZERO, torque: 0.0})
+          .insert(Velocity::zero())
           .insert(GravityScale(1.0))
+          .insert(Damping::default())
           .insert(ColliderMassProperties::MassProperties(MassProperties{
               local_center_of_mass: Vec2::ZERO,
               principal_inertia: 3000.0,
